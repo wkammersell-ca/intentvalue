@@ -2,23 +2,12 @@ Ext.define('CustomApp', {
 	extend: 'Rally.app.TimeboxScopedApp',
 	scopeType: 'release',
 	
-	noFeatureId: 3,
-	noInvestmentCategory: 'Unplanned Stories',
-	noInvestmentColor: '#666',
+	CAIntesnts: [ "Avoid Costs", "Reduce Costs", "Protect Revenue", "Create Revenue" ],
+	customerPerceivedValues: [ "Enabler", "Table Stakes", "Competitive", "Differentiator" ],
 	
-	cvFeatureId: 1,
-	cvInvestmentCategory: 'CV Defects',
-	cvInvestmentColor: '#FF8200',
-	
-	defectFeatureId: 2,
-	defectInvestmentCategory: 'non-CV Defects',
-	defectInvestmentColor: '#F6A900',
-	
-	colors: [ '#B81B10', '#FAD200', '#F66349', '#FFDD82' ],
-	
-	chartColors: [],
-	features: [],
 	workItems: [],
+	features: [],
+	initiatives: [],
 	totalPoint: 0,
 	
 	onScopeChange: function( scope ) {
@@ -38,7 +27,7 @@ Ext.define('CustomApp', {
 		// Show loading message
 		this._myMask = new Ext.LoadMask( Ext.getBody(),
 			{
-				msg: "Loading work items..."
+				msg: "Loading..."
 			}
 		);
 		this._myMask.show();
@@ -49,17 +38,12 @@ Ext.define('CustomApp', {
 			'Rally.data.wsapi.artifact.Store',
 			{
 				models: ['UserStory','Defect'],
-				fetch: ['ObjectID','PlanEstimate','Feature','Tags'],
+				fetch: ['ObjectID','PlanEstimate','Feature'],
 				filters: [
 					{
 						property: 'Release.Name',
 						value: scope.record.data.Name
-					} /*,  //Only look at accepted work items
-					{
-						property: 'ScheduleState',
-						operator: '>=',
-						value: 'Accepted'
-					} */
+					}
 				],
 				context: dataScope,
 				limit: Infinity
@@ -68,23 +52,7 @@ Ext.define('CustomApp', {
 		);
 		
 		// Resetting global variables
-		this.features = {};
-		
-		this.features[ this.cvFeatureId ] = {};
-		this.features[ this.cvFeatureId ].estimate = 0;
-		this.features[ this.cvFeatureId ].investmentCategory = this.cvInvestmentCategory;
-		this.chartColors.push( this.cvInvestmentColor );
-		
-		this.features[ this.defectFeatureId ] = {};
-		this.features[ this.defectFeatureId ].estimate = 0;
-		this.features[ this.defectFeatureId ].investmentCategory = this.defectInvestmentCategory;
-		this.chartColors.push( this.defectInvestmentColor );
-		
-		this.features[ this.noFeatureId ] = {};
-		this.features[ this.noFeatureId ].estimate = 0;
-		this.features[ this.noFeatureId ].investmentCategory = this.noInvestmentCategory;
-		this.chartColors.push( this.noInvestmentColor );
-		
+		this.features = {};		
 		this.workItems = [];
 		this.totalPoints = 0;
 		
@@ -94,23 +62,16 @@ Ext.define('CustomApp', {
 					if( operation.wasSuccessful() ) {
 						if (records.length > 0) {
 								_.each(records, function(record){
-									var featureId = this.noFeatureId;
-									if ( record.raw.Tags && ( _.find( record.raw.Tags._tagsNameArray, function( tag ) {
-												return ( tag.Name == 'Customer Voice' );
-											} ) ) ) {
-										featureId = this.cvFeatureId;
-									} else if ( record.raw.Feature ) {
-										featureId = record.raw.Feature.ObjectID;
-									} else if ( record.get('_type') == 'defect' ) {
-										featureId = this.defectFeatureId;
+									if ( record.raw.Feature ) {
+										var featureId = record.raw.Feature.ObjectID;
+										if( !( featureId in this.features ) ) {
+											this.features[ featureId ] = {};
+											this.features[ featureId ].estimate = 0;
+											this.features[ featureId ].initative = null;
+										}
+										this.features[ featureId ].estimate += record.raw.PlanEstimate;
+										this.totalPoints += record.raw.PlanEstimate;
 									}
-									if( !( featureId in this.features ) ) {
-										this.features[ featureId ] = {};
-										this.features[ featureId ].estimate = 0;
-										this.features[ featureId ].investmentCategory = this.noInvestmentCategory;
-									}
-									this.features[ featureId ].estimate += record.raw.PlanEstimate;
-									this.totalPoints += record.raw.PlanEstimate;
 								},this);
 							
 							this._myMask.msg = 'Loading Features...';
@@ -124,19 +85,13 @@ Ext.define('CustomApp', {
 		});
 	},
 	
-	loadFeatures: function( featureIndex ) {
+	loadFeatures: function( index ) {
 		var keys = Object.keys( this.features );
 		
-		if ( featureIndex >= keys.length ) {
-			this.compileData();
-		} else if ( ( keys[ featureIndex ] == this.noFeatureId ) ||
-					( keys[ featureIndex ] == this.defectFeatureId ) ||
-					( keys[ featureIndex ] == this.cvFeatureId ) ) {
-			this.loadFeatures( featureIndex + 1 );
+		if ( index >= keys.length ) {
+			this.loadInitiatives( 0 );
 		} else {
-			// Set a default as an error here
-			this.features[ keys[ featureIndex ] ].investmentCategory = 'Unknown';
-			
+			// Set a global scope as the Feature may be in another project
 			var dataScope = {
 				workspace: this.getContext().getWorkspaceRef(),
 				project: null
@@ -146,11 +101,11 @@ Ext.define('CustomApp', {
 				'Rally.data.wsapi.artifact.Store',
 				{
 					models: ['PortfolioItem/Feature'],
-					fetch: ['ObjectID','InvestmentCategory'],
+					fetch: ['ObjectID', 'Parent'],
 					filters: [
 						{
 							property: 'ObjectID',
-							value: keys[ featureIndex ]
+							value: keys[ index ]
 						}
 					],
 					context: dataScope,
@@ -165,12 +120,73 @@ Ext.define('CustomApp', {
 					if( operation.wasSuccessful() ) {
 						if (records.length > 0) {
 							_.each(records, function( record ){
-								var featureId = record.raw.ObjectID;
-								this.features[ featureId ].investmentCategory = record.raw.InvestmentCategory;									
+								if ( record.raw.Parent) {
+									var featureId = record.raw.ObjectID;
+									var initiativeId = record.raw.Parent.ObjectID;
+									if( !( initiativeId in this.initiatives ) ) {
+										this.initiatives[ initiativeId ] = {};
+										this.initiatives[ initiativeId ].estimate = 0;
+										this.initiatives[ initiativeId ].customerPerceivedValue = null;
+										this.initiatives[ initiativeId ].CAIntent = null;
+									}
+									
+									this.features[ featureId ].initative = initiativeId;
+									this.initiatives[ initiativeId ].estimate += this.features[ featureId ].estimate;
+								}
 							},this);
 						}
 					}	
-					this.loadFeatures( featureIndex + 1 );
+					this.loadFeatures( index + 1 );
+				}
+			});
+		}
+	},
+	
+	loadInitiatives: function( index ) {
+		var keys = Object.keys( this.initiatives );
+		
+		if ( index >= keys.length ) {
+			console.log( this.initiatives );
+		} else {
+			// Set a global scope as the Feature may be in another project
+			var dataScope = {
+				workspace: this.getContext().getWorkspaceRef(),
+				project: null
+			};
+			
+			var store = Ext.create(
+				'Rally.data.wsapi.artifact.Store',
+				{
+					models: ['PortfolioItem/Initiative'],
+					fetch: ['ObjectID', 'c_CAIntent', 'c_CustomerPerceivedValue', 'FormattedID', 'Name', 'DisplayColor'],
+					filters: [
+						{
+							property: 'ObjectID',
+							value: keys[ index ]
+						}
+					],
+					context: dataScope,
+					limit: Infinity
+				},
+				this
+			);
+			
+			store.load( {
+				scope: this,
+				callback: function( records, operation ) {
+					if( operation.wasSuccessful() ) {
+						if (records.length > 0) {
+							_.each(records, function( record ){
+								var initiativeId = record.raw.ObjectID;
+								this.initiatives[ initiativeId ].name = record.raw.Name;
+								this.initiatives[ initiativeId ].formattedId = record.raw.FormattedID;
+								this.initiatives[ initiativeId ].displayColor = record.raw.DisplayColor;
+								this.initiatives[ initiativeId ].CAIntent = record.raw.c_CAIntent;
+								this.initiatives[ initiativeId ].customerPerceivedValue = record.raw.c_CustomerPerceivedValue;
+							},this);
+						}
+					}	
+					this.loadInitiatives( index + 1 );
 				}
 			});
 		}

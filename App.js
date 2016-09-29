@@ -2,12 +2,11 @@ Ext.define('CustomApp', {
 	extend: 'Rally.app.TimeboxScopedApp',
 	scopeType: 'release',
 	
-	CAIntesnts: [ "Avoid Costs", "Reduce Costs", "Protect Revenue", "Create Revenue" ],
-	customerPerceivedValues: [ "Enabler", "Table Stakes", "Competitive", "Differentiator" ],
+	CAIntents: [ "", "Avoid Costs", "Reduce Costs", "Protect Revenue", "Create Revenue", "" ],
+	customerPerceivedValues: [ "", "Enabler", "Table Stakes", "Competitive", "Differentiator", "" ],
 	
-	workItems: [],
-	features: [],
-	initiatives: [],
+	features: {},
+	initiatives: {},
 	totalPoint: 0,
 	
 	onScopeChange: function( scope ) {
@@ -52,8 +51,8 @@ Ext.define('CustomApp', {
 		);
 		
 		// Resetting global variables
-		this.features = {};		
-		this.workItems = [];
+		this.features = {};
+		this.initiatives = {};
 		this.totalPoints = 0;
 		
 		store.load( {
@@ -146,7 +145,7 @@ Ext.define('CustomApp', {
 		var keys = Object.keys( this.initiatives );
 		
 		if ( index >= keys.length ) {
-			console.log( this.initiatives );
+			this.compileData();
 		} else {
 			// Set a global scope as the Feature may be in another project
 			var dataScope = {
@@ -195,70 +194,115 @@ Ext.define('CustomApp', {
 	compileData: function(){
 		this._myMask.msg = 'Compiling Data...';
 		
-		var investmentSums = {};
-		_.each( this.features, function( feature ) {
-			if( !( feature.investmentCategory in investmentSums ) ) {
-				investmentSums[ feature.investmentCategory ] = 0;
-				
-				// push on more colors if we're past the first set of sums
-				var keysLength = Object.keys( investmentSums ).length;
-				if ( keysLength > 3 ) {
-					this.chartColors.push( this.colors[ ( keysLength - 4 ) % this.colors.length ] );
+		var chartArray = [];
+		// Initialize array
+		for ( x = 0; x < this.CAIntents.length; x++ ) {
+			chartArray.push( [] );
+			for ( y = 0; y < this.customerPerceivedValues.length; y++ ) {
+				chartArray[ x ].push( [] );
+			}
+		}
+		
+		// Put Initiatives into the array
+		_.each( this.initiatives, function( initiative ) {
+			chartArray[ this.CAIntents.indexOf( initiative.CAIntent ) ][ this.customerPerceivedValues.indexOf( initiative.customerPerceivedValue ) ].push( initiative );
+		}, this );
+		
+		// Convert the array into series
+		var seriesData = [];
+		for ( x = 0; x < this.CAIntents.length; x++ ) {
+			for ( y = 0; y < this.customerPerceivedValues.length; y++ ) {
+				var cell = chartArray[ x ][ y ];
+				if ( cell.length > 0 ) {
+					cell.sort( function( a, b ) { return a.estimate < b.estimate; } );
+					
+					var series = {};
+					var cellEstimate = cell.reduce( function( total, a ) { return total + a.estimate; }, 0 );
+					
+					series.marker = { 
+						fillColor: cell[ 0 ].displayColor,
+						lineColor: '#000000'
+					};
+					series.data = [ {
+						x: x,
+						y: y,
+						z: ( cellEstimate / this.totalPoints ) * 100,
+						name: cell.reduce( function( string, a ) { return string + a.formattedId + '<br/>'; }, "" ),
+						tooltip: cell.reduce( function( string, a ) { return string + '<b>' + a.formattedId + ': </b>' + a.name + ' = ' + ( Math.round( ( a.estimate / cellEstimate ) * 100 ) ) + '%<br/>'; }, "" ),
+						color: cell[ 0 ].displayColor
+					} ];
+					seriesData.push( series );
 				}
 			}
-			investmentSums[ feature.investmentCategory ] += feature.estimate;
-		}, this);
-		
-		var series = [];
-		series.push( {} );
-		series[0].name = 'Investment Categories';
-		series[0].colorByPoint = true;
-								
-		series[0].data = [];
-		_.each( _.keys( investmentSums ), function( investmentCategory ) {
-			series[0].data.push(
-				{
-					name: investmentCategory,
-					y: investmentSums[ investmentCategory ] / this.totalPoints
-				}
-			);
-		}, this );
-							
-		this.makeChart( series );
+		}
+		this.makeChart( seriesData );
 	},
 	
-	makeChart: function( series ){
+	makeChart: function( seriesData ){
+		var CAIntentsCategories = this.CAIntents;
+		var customerPerceivedValuesCategories = this.customerPerceivedValues;
+	
 		var chart = this.add({
 				xtype: 'rallychart',
 				chartConfig: {
 					chart:{
-						type: 'pie'
+						type: 'bubble',
+						zoomType: 'xy'
+					},
+					legend: {
+						enabled: false
+					},
+					xAxis: {
+						title: {
+							text: 'CA Intent'
+						},
+						labels: {
+							formatter: function () {
+								return CAIntentsCategories[ this.value ];
+							}
+						},
+						tickInterval: 1,
+						min: 0,
+						max: CAIntentsCategories.length - 1
+					},
+					yAxis: {
+						title: {
+							text: 'Customer Perceived Value'
+						},
+						labels: {
+							formatter: function () {
+								return customerPerceivedValuesCategories[ this.value ];
+							}
+						},
+						tickInterval: 1,
+						min: 0,
+						max: customerPerceivedValuesCategories.length - 1
 					},
 					title:{
-						text: 'Investment Category Spend'
+						text: 'Initiatives by CA Intents and Customer Perceived Value'
 					},
 					tooltip: {
-						pointFormat: '{series.name}: <b>{point.percentage:.1f}%</b>'
+						useHTML: true,
+						pointFormat: '{point.tooltip}',
+						headerFormat: ''
 					},
 					plotOptions: {
-						pie: {
-							allowPointSelect: true,
-							cursor: 'pointer',
+						series: {
 							dataLabels: {
 								enabled: true,
-								format: '<b>{point.name}</b>: {point.percentage:.1f} %'
+								useHTML: true,
+								format: '{point.name}',
+								color: '#ffffff',
+								shadow: false
 							}
 						}
 					}
 				},
 									
 				chartData: {
-					series: series
-				}
+					series: seriesData
+				} 
 		});
-		
-		// Workaround bug in setting colors - http://stackoverflow.com/questions/18361920/setting-colors-for-rally-chart-with-2-0rc1/18362186
-		chart.setChartColors( this.chartColors );
 		
 		this._myMask.hide();
 	},

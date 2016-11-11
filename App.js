@@ -73,7 +73,6 @@ Ext.define('CustomApp', {
 									}
 								},this);
 							
-							this._myMask.msg = 'Loading Features...';
 							this.loadFeatures( 0 );
 						}
 						else if(records.length === 0 && this.features.length === 0){
@@ -122,7 +121,7 @@ Ext.define('CustomApp', {
 								if ( record.raw.Parent) {
 									var featureId = record.raw.ObjectID;
 									var initiativeId = record.raw.Parent.ObjectID;
-									if( !( initiativeId in this.initiatives ) ) {
+									if( initiativeId && !( initiativeId in this.initiatives ) ) {
 										this.initiatives[ initiativeId ] = {};
 										this.initiatives[ initiativeId ].estimate = 0;
 										this.initiatives[ initiativeId ].customerPerceivedValue = null;
@@ -192,8 +191,6 @@ Ext.define('CustomApp', {
 	},
 	
 	compileData: function(){
-		this._myMask.msg = 'Compiling Data...';
-		
 		var chartArray = [];
 		// Initialize array
 		for ( x = 0; x < this.CAIntents.length; x++ ) {
@@ -205,7 +202,9 @@ Ext.define('CustomApp', {
 		
 		// Put Initiatives into the array
 		_.each( this.initiatives, function( initiative ) {
-			chartArray[ this.CAIntents.indexOf( initiative.CAIntent ) ][ this.customerPerceivedValues.indexOf( initiative.customerPerceivedValue ) ].push( initiative );
+			if( initiative.CAIntent && initiative.customerPerceivedValue ) {
+				chartArray[ this.CAIntents.indexOf( initiative.CAIntent ) ][ this.customerPerceivedValues.indexOf( initiative.customerPerceivedValue ) ].push( initiative );
+			}
 		}, this );
 		
 		// Convert the array into series
